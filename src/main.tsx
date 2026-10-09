@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router'
 import { AdminAuthProvider } from './auth/AdminAuthProvider'
 import { RequireAdmin } from './auth/RequireAdmin'
+import { RequireRole } from './auth/RequireRole'
+import { LOG_ROLES } from './auth/roles'
 import { AppPageSkeleton, AuthSkeleton, ListPageSkeleton } from './components/Skeleton'
 import './index.css'
 import { AdminShell } from './layouts/AdminShell'
@@ -32,6 +34,8 @@ const router = createBrowserRouter([
           { path: 'health', element: lazyPage(() => import('./pages/Health'), 'Health', <AppPageSkeleton />) },
           { path: 'escrow', element: lazyPage(() => import('./pages/Escrow'), 'Escrow', <AppPageSkeleton />) },
           { path: 'audit', element: lazyPage(() => import('./pages/Audit'), 'Audit', <ListPageSkeleton />) },
+          { path: 'logs', element: <RequireRole roles={LOG_ROLES}>{lazyPage(() => import('./pages/ServerLog'), 'ServerLog', <ListPageSkeleton />)}</RequireRole> },
+          { path: 'errors', element: <RequireRole roles={LOG_ROLES}>{lazyPage(() => import('./pages/ErrorLog'), 'ErrorLog', <ListPageSkeleton />)}</RequireRole> },
           { path: 'team', element: lazyPage(() => import('./pages/Team'), 'Team', <ListPageSkeleton />) },
           { path: 'settings', element: lazyPage(() => import('./pages/Settings'), 'Settings', <AppPageSkeleton />) },
           { path: '*', element: <NotFound /> },

@@ -1,6 +1,7 @@
 import {
   Activity,
   BadgeCheck,
+  Bug,
   Building2,
   Camera,
   ClipboardList,
@@ -11,6 +12,7 @@ import {
   LogOut,
   Menu,
   Scale,
+  ScrollText,
   Search,
   Settings,
   ShieldAlert,
@@ -22,6 +24,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useAdminAuth } from '../auth/context'
+import { LOG_ROLES } from '../auth/roles'
 import { Logo } from '../components/Logo'
 import { ScrollToTop } from '../components/ScrollToTop'
 import { Avatar } from '../components/ui'
@@ -43,6 +46,8 @@ interface NavItem {
 
 function useNav(): { title: string; items: NavItem[] }[] {
   const { disputes, reviews, risks, reportIds, approvals } = useAdmin()
+  const { session } = useAdminAuth()
+  const seesLogs = Boolean(session && LOG_ROLES.includes(session.role))
   const open = (s: string) => s !== 'Approved' && s !== 'Failure confirmed'
   return [
     { title: '', items: [{ to: '/', label: 'Overview', icon: Gauge }] },
@@ -66,6 +71,17 @@ function useNav(): { title: string; items: NavItem[] }[] {
       ],
     },
     { title: 'Money', items: [{ to: '/escrow', label: 'Escrow and settlements', icon: Landmark }] },
+    ...(seesLogs
+      ? [
+          {
+            title: 'System',
+            items: [
+              { to: '/logs', label: 'Server log', icon: ScrollText },
+              { to: '/errors', label: 'Error log', icon: Bug },
+            ],
+          },
+        ]
+      : []),
     {
       title: 'Governance',
       items: [

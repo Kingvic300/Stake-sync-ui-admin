@@ -1,34 +1,84 @@
 import { ShieldCheck } from 'lucide-react'
+import QRCode from 'qrcode'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
-import { useAdminAuth } from '../auth/context'
+import { useAdminAuth, type AdminSession } from '../auth/context'
 import { Logo } from '../components/Logo'
 import { Button, Field } from '../components/ui'
-import { admins } from '../data/admin'
+import { admins, type AdminRole } from '../data/admin'
+import { api, apiEnabled, ApiError } from '../lib/api'
 import { cx } from '../lib/format'
 import { inputBase, inputClass } from '../lib/styles'
 
-/** Email and password, then a 6-digit authenticator code. Every admin must use two-step verification. */
+interface LoginResponse {
+  accessToken: string
+  refreshToken: string
+  twoFactorRequired?: boolean
+  user: { name: string; email: string; adminRole: AdminRole }
+}
+
+type Step = 'password' | 'code' | 'enroll'
+
+/**
+ * Email and password, then a 6-digit authenticator code. An admin without two-step verification
+ * sets it up here before getting in.
+ */
 export function Login() {
   const { session, signIn } = useAdminAuth()
   const navigate = useNavigate()
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/'
-  const [step, setStep] = useState<'password' | 'code'>('password')
-  const [email, setEmail] = useState('victor@stakesync.app')
+  const [step, setStep] = useState<Step>('password')
+  const [email, setEmail] = useState(apiEnabled ? '' : 'victor@stakesync.app')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pending, setPending] = useState<LoginResponse | null>(null)
+  const [enroll, setEnroll] = useState<{ secret: string; qr: string } | null>(null)
   const codeRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (step === 'code') codeRef.current?.focus()
-  }, [step])
+    if (step !== 'password') codeRef.current?.focus()
+  }, [step, enroll])
 
   if (session) return <Navigate to="/" replace />
 
-  function submit(e: FormEvent) {
-    e.preventDefault()
+  function finish(r: LoginResponse, accessToken = r.accessToken) {
+    const s: AdminSession = { name: r.user.name, email: r.user.email, role: r.user.adminRole, accessToken, refreshToken: r.refreshToken }
+    signIn(s)
+    navigate(from, { replace: true })
+  }
+
+  async function startEnrollment(r: LoginResponse) {
+    const setup = await api<{ secret: string; otpauthUrl: string }>('/auth/admin/2fa/setup', { method: 'POST', token: r.accessToken })
+    const qr = await QRCode.toDataURL(setup.otpauthUrl, { margin: 1, width: 220 })
+    setPending(r)
+    setEnroll({ secret: setup.secret, qr })
+    setCode('')
+    setStep('enroll')
+  }
+
+  async function submitApi() {
+    if (step === 'enroll') {
+      if (!/^\d{6}$/.test(code)) return setError('Enter the 6-digit code your authenticator app shows.')
+      const r = await api<{ accessToken: string }>('/auth/admin/2fa/enable', { method: 'POST', token: pending!.accessToken, body: { code } })
+      return finish(pending!, r.accessToken)
+    }
+    if (step === 'code' && !/^\d{6}$/.test(code)) return setError('Enter the 6-digit code from your authenticator app.')
+    try {
+      const r = await api<LoginResponse>('/auth/admin/login', { method: 'POST', body: { email: email.trim(), password, ...(step === 'code' ? { code } : {}) }, token: '' })
+      if (r.twoFactorRequired) return await startEnrollment(r)
+      finish(r)
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'two_factor_required') {
+        setError('')
+        return setStep('code')
+      }
+      throw e
+    }
+  }
+
+  function submitDemo() {
     if (step === 'password') {
       const admin = admins.find((a) => a.email === email.trim().toLowerCase())
       if (!admin || password.length < 8) return setError('That email and password don’t match an admin account.')
@@ -36,10 +86,29 @@ export function Login() {
       return setStep('code')
     }
     if (!/^\d{6}$/.test(code)) return setError('Enter the 6-digit code from your authenticator app.')
-    setBusy(true)
     const admin = admins.find((a) => a.email === email.trim().toLowerCase())!
     signIn({ name: admin.person.name, email: admin.email, role: admin.role })
     navigate(from, { replace: true })
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    if (!apiEnabled) return submitDemo()
+    setBusy(true)
+    setError('')
+    try {
+      await submitApi()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const titles: Record<Step, [string, string]> = {
+    password: ['Admin sign in', 'For Stake-Sync staff only. Every action here is recorded.'],
+    code: ['Two-step verification', 'Open your authenticator app and enter the current code.'],
+    enroll: ['Set up two-step verification', 'Admins need it before using the console. Scan the code with an authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code it shows.'],
   }
 
   return (
@@ -48,12 +117,10 @@ export function Login() {
         <Logo />
         <main id="main" className="flex flex-1 items-center justify-center py-10">
           <form onSubmit={submit} noValidate className="w-full max-w-[24rem]">
-            <h1 className="text-4xl font-bold">{step === 'password' ? 'Admin sign in' : 'Two-step verification'}</h1>
-            <p className="mt-2 text-slate">
-              {step === 'password' ? 'For Stake-Sync staff only. Every action here is recorded.' : 'Open your authenticator app and enter the current code.'}
-            </p>
+            <h1 className="text-4xl font-bold">{titles[step][0]}</h1>
+            <p className="mt-2 text-slate">{titles[step][1]}</p>
             <div className="mt-8 space-y-4">
-              {step === 'password' ? (
+              {step === 'password' && (
                 <>
                   <Field label="Work email">
                     <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" className={inputClass} />
@@ -62,7 +129,17 @@ export function Login() {
                     <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" className={inputClass} />
                   </Field>
                 </>
-              ) : (
+              )}
+              {step === 'enroll' && enroll && (
+                <div className="flex flex-col items-center gap-3 rounded-2xl bg-surface p-5 ring-1 ring-line/70">
+                  <img src={enroll.qr} alt="QR code for your authenticator app" width={180} height={180} className="rounded-lg" />
+                  <p className="text-center text-sm text-slate">
+                    Can’t scan? Enter this key:
+                    <span className="mt-1 block font-mono text-[13px] font-semibold tracking-wider break-all text-ink select-all">{enroll.secret}</span>
+                  </p>
+                </div>
+              )}
+              {step !== 'password' && (
                 <Field label="Authentication code">
                   <input
                     ref={codeRef}
@@ -81,10 +158,18 @@ export function Login() {
                 </p>
               )}
               <Button type="submit" className="w-full" size="lg" busy={busy}>
-                {step === 'password' ? 'Continue' : 'Verify and sign in'}
+                {step === 'password' ? 'Continue' : step === 'enroll' ? 'Turn on and sign in' : 'Verify and sign in'}
               </Button>
-              {step === 'code' && (
-                <button type="button" onClick={() => setStep('password')} className="w-full text-center text-sm font-semibold text-slate hover:text-ink">
+              {step !== 'password' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('password')
+                    setCode('')
+                    setError('')
+                  }}
+                  className="w-full text-center text-sm font-semibold text-slate hover:text-ink"
+                >
                   Use a different account
                 </button>
               )}

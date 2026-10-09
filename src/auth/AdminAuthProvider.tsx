@@ -1,7 +1,8 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { api, apiEnabled, bindSession } from '../lib/api'
 import { AdminAuthContext, type AdminSession } from './context'
 
-// Placeholder session until the admin auth endpoints exist. Sessions should be short-lived in production.
+// Per-tab session (sessionStorage), so closing the tab signs the admin out.
 const KEY = 'stakesync.admin'
 
 function load(): AdminSession | null {
@@ -15,6 +16,25 @@ function load(): AdminSession | null {
 
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AdminSession | null>(load)
+  const current = useRef(session)
+  useEffect(() => {
+    current.current = session
+    try {
+      if (session) sessionStorage.setItem(KEY, JSON.stringify(session))
+      else sessionStorage.removeItem(KEY)
+    } catch {
+      // this tab only
+    }
+  }, [session])
+
+  useEffect(() => {
+    bindSession({
+      get: () => current.current,
+      update: (t) => setSession((s) => (s ? { ...s, ...t } : s)),
+      expire: () => setSession(null),
+    })
+  }, [])
+
   const value = useMemo(
     () => ({
       session,
@@ -27,6 +47,8 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         setSession(s)
       },
       signOut: () => {
+        // End the session on the server too, so the token stops working everywhere.
+        if (apiEnabled && session?.accessToken) void api('/auth/logout', { method: 'POST' }).catch(() => undefined)
         try {
           sessionStorage.removeItem(KEY)
         } catch {

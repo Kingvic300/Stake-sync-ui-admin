@@ -39,6 +39,7 @@ export const permissions: { action: string; roles: AdminRole[] }[] = [
   { action: 'Unlist or pause a challenge', roles: ['Super admin', 'Moderator'] },
   { action: 'Approve organizations', roles: ['Super admin', 'Support'] },
   { action: 'View escrow and transactions', roles: ['Super admin', 'Risk analyst', 'Finance (view only)'] },
+  { action: 'View server and error logs', roles: ['Super admin', 'Risk analyst'] },
   { action: 'Move escrowed funds', roles: [] },
   { action: 'Manage team and roles', roles: ['Super admin'] },
 ]

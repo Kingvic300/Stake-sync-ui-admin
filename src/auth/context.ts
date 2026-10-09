@@ -5,6 +5,9 @@ export interface AdminSession {
   name: string
   email: string
   role: AdminRole
+  /** Present when signed in against the real API. */
+  accessToken?: string
+  refreshToken?: string
 }
 
 export interface AdminAuth {
